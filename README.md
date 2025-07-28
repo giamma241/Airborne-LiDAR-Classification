@@ -19,7 +19,3 @@ conda activate lidar-env
 ```bash
 python scripts/run_classical.py --input data/raw/sample.las --output data/results/sample_ground.las --method csf
 ```
-
-## Contact
-Your Name - your.email@example.com
-"""
