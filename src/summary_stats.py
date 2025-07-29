@@ -49,6 +49,9 @@ def summarize_las(source):
 
         area = (x.max() - x.min()) * (y.max() - y.min())
 
+    density = len(z) / area
+    print("\nAvg density (points/m²):", round(density, 2))
+
     # Stats
     print("\nAltitude (Z): min =", z.min(), ", max =", z.max())
     print("Intensity: min =", intensity.min(), ", max =", intensity.max())
@@ -57,9 +60,6 @@ def summarize_las(source):
     print("\nClass counts:")
     for c, count in zip(classes, counts):
         print(f"  Class {c}: {count} points")
-
-    density = len(z) / area
-    print("\nAvg density (points/m²):", round(density, 2))
 
 
 # Example usage:
