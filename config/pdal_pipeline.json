@@ -1,0 +1,26 @@
+{
+  "pipeline": [
+    {
+      "type": "readers.las",
+      "filename": "../data/raw_data.las"
+    },
+    {
+      "type": "filters.range",
+      "limits": "Z[-100:500]"
+    },
+    {
+      "type": "filters.outlier",
+      "method": "statistical",
+      "mean_k": 16,
+      "multiplier": 2.5
+    },
+    {
+      "type": "filters.voxeldownsize",
+      "cell": 1.0
+    },
+    {
+      "type": "writers.las",
+      "filename": "../data/raw_data_cleaned.las"
+    }
+  ]
+}
