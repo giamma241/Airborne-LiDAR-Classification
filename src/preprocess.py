@@ -20,7 +20,9 @@ def run_pdal_pipeline(config_path="../config/pdal_pipeline_preprocess.json"):
 
     # Try to find the output file from the pipeline definition
     output_file = None
-    for stage in pipeline_def:
+    # The JSON can be a dictionary with a top-level "pipeline" key
+    stages = pipeline_def.get("pipeline", pipeline_def)
+    for stage in stages:
         if isinstance(stage, dict) and "filename" in stage:
             output_file = stage["filename"]
 
