@@ -13,7 +13,7 @@ def summarize_las(source):
     """
     Summarizes LAS data whether from laspy.LasData or PDAL numpy array.
 
-    Parameters:
+    Params:
     - source: laspy.LasData OR numpy structured array from PDAL
     """
     # Detect type

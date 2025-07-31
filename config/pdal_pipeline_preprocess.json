@@ -20,7 +20,7 @@
     },
     {
       "type": "writers.las",
-      "filename": "../data/raw_data_cleaned.las"
+      "filename": "../data/processed/raw_data_cleaned.las"
     }
   ]
 }
