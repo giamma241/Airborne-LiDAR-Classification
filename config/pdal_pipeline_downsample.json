@@ -2,15 +2,15 @@
   "pipeline": [
     {
       "type": "readers.las",
-      "filename": "../data/raw_data.las"
+      "filename": "../data/raw/raw_data_tscan.las"
     },
     {
       "type": "filters.voxeldownsize",
-      "cell": 1.0
+      "cell": 0.2
     },
     {
       "type": "writers.las",
-      "filename": "../data/raw_data_cleaned.las"
+      "filename": "../data/processed/raw_data_tscan.las"
     }
   ]
 }
