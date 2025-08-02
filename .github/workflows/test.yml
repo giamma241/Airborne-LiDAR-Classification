@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, "release/*", "dev"]
+    branches: [main, "release/*"]
 
 jobs:
   run_tests_ubuntu:
@@ -14,9 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest"]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.7", "3.8", "3.9", "3.10"]
 
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -49,9 +49,9 @@ jobs:
       fail-fast: false
       matrix:
         os: ["macos-latest"]
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.7", "3.8", "3.9", "3.10"]
 
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
