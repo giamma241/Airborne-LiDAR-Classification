@@ -12,9 +12,8 @@ logging.basicConfig(
 def run_csf(
     input_file: str,
     output_file: str,
-    cloth_resolution: float = 0.5,
     rigidness: int = 2,
-    time_step: float = 0.65,
+    step: float = 0.65,
 ) -> str:
     """
     Runs PDAL Cloth Simulation Filter (CSF) and saves the output.
@@ -36,9 +35,8 @@ def run_csf(
             {"type": "readers.las", "filename": input_file},
             {
                 "type": "filters.csf",
-                "cloth_resolution": cloth_resolution,
                 "rigidness": rigidness,
-                "time_step": time_step,
+                "step": step,
             },
             {"type": "writers.las", "filename": output_file},
         ]
