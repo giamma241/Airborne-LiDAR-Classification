@@ -12,10 +12,10 @@ logging.basicConfig(
 def run_pmf(
     input_file: str,
     output_file: str,
+    cell_size: float = 1.0,
+    initial_distance: float = 1.0,
     max_window_size: int = 33,
     slope: float = 1.0,
-    initial_distance: float = 0.5,
-    cell_size: float = 1.0,
 ) -> str:
     """
     Runs PDAL Progressive Morphological Filter (PMF) and saves the output.
@@ -38,10 +38,10 @@ def run_pmf(
             {"type": "readers.las", "filename": input_file},
             {
                 "type": "filters.pmf",
+                "cell_size": cell_size,
+                "initial_distance": initial_distance,
                 "max_window_size": max_window_size,
                 "slope": slope,
-                "initial_distance": initial_distance,
-                "cell_size": cell_size,
             },
             {"type": "writers.las", "filename": output_file},
         ]
