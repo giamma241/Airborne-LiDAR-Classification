@@ -1,13 +1,14 @@
-import numpy as np
-import laspy
 from pathlib import Path
+
+import laspy
+import numpy as np
 
 try:  # pragma: no cover
     import torch
 except Exception:  # pragma: no cover
     torch = None
 
-from src.datasets.dataset_loader import (
+from preprocessing.data_loader import (
     PointCloudDataset,
     grid_patch,
     load_point_cloud,
