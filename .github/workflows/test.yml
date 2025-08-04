@@ -12,8 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]  # Start with Ubuntu only, add others after fixing
-        python-version: ['3.9', '3.10', '3.11']  # Remove 3.7, focus on stable versions
+        os: [ubuntu-latest]
+        python-version: ['3.9', '3.10', '3.11']
     
     steps:
     - name: Checkout code
@@ -29,8 +29,7 @@ jobs:
         environment-file: environment.yml
         use-mamba: true
     
-    - name: Install system dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -48,100 +47,51 @@ jobs:
         conda info
         conda list
         python --version
-        python -c "import gdal; print(f'GDAL version: {gdal.__version__}')"
+        python -c "import gdal; print('GDAL version:', gdal.__version__)"
         python -c "import pdal; print('PDAL imported successfully')"
         python -c "import laspy; print('Laspy imported successfully')"
-        python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+        python -c "import torch; print('PyTorch version:', torch.__version__)"
     
     - name: Install package in development mode
       shell: bash -el {0}
       run: |
-        # Install your package in development mode
         pip install -e .
     
-    - name: Create test data directory
+    - name: Create basic test script
       run: |
-        mkdir -p tests/data
-        # You might want to add some small test files here
-    
-    - name: Run tests
-      shell: bash -el {0}
-      run: |
-        # Create basic test structure if it doesn't exist
         mkdir -p tests
-        
-        # Run tests with verbose output
-        python -m pytest tests/ -v --tb=short --disable-warnings
-        
-        # If no tests exist yet, run a basic import test
-        if [ ! -f tests/test_*.py ]; then
-          python -c "
+        cat > tests/test_basic.py << 'EOF'
+import pytest
 import sys
-import os
-sys.path.insert(0, '.')
 
-# Test basic imports
-try:
+def test_python_version():
+    assert sys.version_info >= (3, 8)
+
+def test_imports():
     import torch
     import lightning
     import laspy
     import pdal
     import hydra
-    print('✓ All critical imports successful')
-except ImportError as e:
-    print(f'✗ Import failed: {e}')
-    sys.exit(1)
-
-# Test that we can create basic objects
-try:
     import numpy as np
-    import torch
     
-    # Basic tensor operation
+    # Basic functionality
     x = torch.tensor([1, 2, 3])
-    print(f'✓ PyTorch tensor created: {x}')
+    assert len(x) == 3
     
-    # Basic numpy operation
     y = np.array([1, 2, 3])
-    print(f'✓ NumPy array created: {y}')
+    assert len(y) == 3
     
-    print('✓ Basic functionality test passed')
-except Exception as e:
-    print(f'✗ Basic functionality test failed: {e}')
-    sys.exit(1)
-"
-        fi
+    print("All imports successful")
 
-  test-macos:
-    runs-on: macos-latest
-    if: false  # Disable for now, enable after Ubuntu tests pass
-    strategy:
-      matrix:
-        python-version: ['3.10']
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Mambaforge
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        miniforge-variant: Mambaforge
-        miniforge-version: latest
-        python-version: ${{ matrix.python-version }}
-        activate-environment: myria3d
-        environment-file: environment.yml
-        use-mamba: true
-    
-    - name: Install system dependencies (macOS)
-      run: |
-        brew install gdal proj geos
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+EOF
     
     - name: Run tests
       shell: bash -el {0}
       run: |
-        pip install -e .
-        python -m pytest tests/ -v --tb=short
+        python -m pytest tests/ -v --tb=short --disable-warnings
 
   code-coverage:
     runs-on: ubuntu-latest
@@ -170,16 +120,9 @@ except Exception as e:
       shell: bash -el {0}
       run: |
         pip install -e .
-        
-        # Run coverage if tests exist
-        if ls tests/test_*.py 1> /dev/null 2>&1; then
-          python -m pytest tests/ --cov=src --cov=myria3d --cov-report=xml --cov-report=html
-        else
-          echo "No test files found, skipping coverage"
-        fi
+        python -m pytest tests/ --cov=src --cov-report=xml --cov-report=html
     
     - name: Upload coverage to Codecov
-      if: hashFiles('coverage.xml') != ''
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
