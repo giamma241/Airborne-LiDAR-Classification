@@ -112,6 +112,19 @@ class HDF5Dataset(Dataset):
 
         return data
 
+    def __getstate__(self):
+        """Prepare object for pickling by removing HDF5 file handle."""
+        state = self.__dict__.copy()
+        # Remove the unpicklable HDF5 file handle
+        state["dataset"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore object after unpickling."""
+        self.__dict__.update(state)
+        # HDF5 file handle will be reopened on first access in _get_data()
+        self.dataset = None
+
     def _get_data(self, sample_hdf5_path: str) -> Data:
         """Loads a Data object from the HDF5 dataset.
 
@@ -119,15 +132,15 @@ class HDF5Dataset(Dataset):
         for each process within __get_item__ and not in __init__ to support for Multi-GPU.
 
         See https://discuss.pytorch.org/t/dataloader-when-num-worker-0-there-is-bug/25643/16?u=piojanu.
-
         """
+        # Reopen file if it was closed (e.g., after pickling)
         if self.dataset is None:
             self.dataset = h5py.File(self.hdf5_file_path, "r")
 
         grp = self.dataset[sample_hdf5_path]
         # [...] needed to make a copy of content and avoid closing HDF5.
         # Nota: idx_in_original_cloud SHOULD be np.ndarray, in order to be batched into a list,
-        # which serves to keep track of indivual sample sizes in a simpler way for interpolation.
+        # which serves to keep track of individual sample sizes in a simpler way for interpolation.
         return Data(
             x=torch.from_numpy(grp["x"][...]),
             pos=torch.from_numpy(grp["pos"][...]),
@@ -155,47 +168,92 @@ class HDF5Dataset(Dataset):
     def _get_split_subset(self, split: SPLIT_TYPE):
         """Get a sub-dataset of a specific (train/val/test) split."""
         indices = [
-            idx for idx, p in enumerate(self.samples_hdf5_paths) if p.startswith(split)
+            idx
+            for idx, p in enumerate(self.samples_hdf5_paths)
+            if p.replace("\\", "/").startswith(split + "/")
         ]
         return torch.utils.data.Subset(self, indices)
 
     @property
     def samples_hdf5_paths(self):
         """Index all samples in the dataset, if not already done before."""
+        print("\n[Debug] Indexing samples in HDF5 file...")
         # Use existing if already loaded as variable.
         if self._samples_hdf5_paths:
+            print("[Debug] Using cached samples list")
             return self._samples_hdf5_paths
 
         # Load as variable if already indexed in hdf5 file. Need to decode b-string.
         with h5py.File(self.hdf5_file_path, "r") as hdf5_file:
             if "samples_hdf5_paths" in hdf5_file:
-                self._samples_hdf5_paths = [
-                    os.path.normpath(sample_path.decode("utf-8"))
+                indexed_samples = [
+                    os.path.normpath(sample_path.decode("utf-8")).replace("\\", "/")
                     for sample_path in hdf5_file["samples_hdf5_paths"]
                 ]
-                return self._samples_hdf5_paths
+                # FIX: Only return pre-indexed samples if they actually exist
+                if len(indexed_samples) > 0:
+                    print(f"[Debug] Found {len(indexed_samples)} pre-indexed samples")
+                    self._samples_hdf5_paths = indexed_samples
+                    return self._samples_hdf5_paths
+                else:
+                    print("[Debug] Pre-indexed samples list is empty, re-indexing...")
 
         # Otherwise, index samples, and add the index as an attribute to the HDF5 file.
+        print("[Debug] Manually indexing samples...")
         self._samples_hdf5_paths = []
         with h5py.File(self.hdf5_file_path, "r") as hdf5_file:
             for split in hdf5_file.keys():
                 if split not in ["train", "val", "test"]:
+                    print(f"[Debug] Skipping non-split key: {split}")
                     continue
-                for basename in hdf5_file[split].keys():
-                    for sample_number in hdf5_file[split][basename].keys():
-                        self._samples_hdf5_paths.append(
-                            osp.join(split, basename, sample_number)
-                        )
+                print(f"[Debug] Processing split: {split}")
+                split_group = hdf5_file[split]
 
-        with h5py.File(self.hdf5_file_path, "a") as hdf5_file:
-            # special type to avoid silent string truncation in hdf5 datasets.
-            variable_lenght_str_datatype = h5py.special_dtype(vlen=str)
-            hdf5_file.create_dataset(
-                "samples_hdf5_paths",
-                (len(self._samples_hdf5_paths),),
-                dtype=variable_lenght_str_datatype,
-                data=self._samples_hdf5_paths,
-            )
+                for basename in split_group.keys():
+                    print(f"[Debug] Processing basename: {basename}")
+                    basename_group = split_group[basename]
+
+                    # Check if basename_group is actually a group
+                    if not hasattr(basename_group, "keys"):
+                        print(f"[Debug] Skipping {basename} - not a group")
+                        continue
+
+                    for sample_number in basename_group.keys():
+                        if sample_number.isdigit():  # Only process numeric sample IDs
+                            sample_path = osp.normpath(
+                                osp.join(split, basename, sample_number)
+                            ).replace("\\", "/")
+                            self._samples_hdf5_paths.append(sample_path)
+                            print(f"[Debug] Added sample: {sample_path}")
+                        else:
+                            print(f"[Debug] Skipping non-numeric key: {sample_number}")
+
+        print(
+            f"[Debug] Manual indexing complete: {len(self._samples_hdf5_paths)} samples found"
+        )
+
+        # Save the index to the HDF5 file for future use
+        if len(self._samples_hdf5_paths) > 0:
+            with h5py.File(self.hdf5_file_path, "a") as hdf5_file:
+                # Delete existing empty index if it exists
+                if "samples_hdf5_paths" in hdf5_file:
+                    del hdf5_file["samples_hdf5_paths"]
+                    print("[Debug] Removed existing empty samples_hdf5_paths")
+
+                # Create new index
+                variable_lenght_str_datatype = h5py.special_dtype(vlen=str)
+                hdf5_file.create_dataset(
+                    "samples_hdf5_paths",
+                    (len(self._samples_hdf5_paths),),
+                    dtype=variable_lenght_str_datatype,
+                    data=self._samples_hdf5_paths,
+                )
+                print(
+                    f"[Debug] Saved {len(self._samples_hdf5_paths)} samples to HDF5 index"
+                )
+        else:
+            print("[Debug] WARNING: No samples found to index!")
+
         return self._samples_hdf5_paths
 
 
@@ -239,14 +297,19 @@ def create_hdf5(
                     and "is_complete" not in hdf5_file[split][basename].attrs
                 ):
                     del hdf5_file[split][basename]
-                    # Parse and add subtiles to split group.
+
+            # Parse and add subtiles to split group.
             with h5py.File(hdf5_file_path, "a") as hdf5_file:
                 if basename in hdf5_file[split]:
                     continue
 
+                # Create basename group under split if it doesn't exist
+                basename_group = hdf5_file[split].create_group(basename)
+
                 subtile_overlap = (
                     subtile_overlap_train if split == "train" else 0
                 )  # No overlap at eval time.
+
                 for sample_number, (sample_idx, sample_points) in enumerate(
                     split_cloud_into_samples(
                         las_path,
@@ -262,39 +325,42 @@ def create_hdf5(
                     if pre_filter is not None and pre_filter(data):
                         # e.g. pre_filter spots situations where num_nodes is too small.
                         continue
-                    hdf5_path = os.path.join(
-                        split, basename, str(sample_number).zfill(5)
-                    )
-                    hd5f_path_x = os.path.join(hdf5_path, "x")
-                    hdf5_file.create_dataset(
-                        hd5f_path_x,
+
+                    # FIXED: Create proper nested groups instead of flat datasets
+                    sample_name = str(sample_number).zfill(5)
+                    sample_group = basename_group.create_group(sample_name)
+
+                    # Create datasets within the sample group
+                    x_dataset = sample_group.create_dataset(
+                        "x",
                         data.x.shape,
                         dtype="f",
                         data=data.x,
                     )
-                    hdf5_file[hd5f_path_x].attrs["x_features_names"] = copy.deepcopy(
+                    x_dataset.attrs["x_features_names"] = copy.deepcopy(
                         data.x_features_names
                     )
-                    hdf5_file.create_dataset(
-                        os.path.join(hdf5_path, "pos"),
+
+                    sample_group.create_dataset(
+                        "pos",
                         data.pos.shape,
                         dtype="f",
                         data=data.pos,
                     )
-                    hdf5_file.create_dataset(
-                        os.path.join(hdf5_path, "y"),
+                    sample_group.create_dataset(
+                        "y",
                         data.y.shape,
                         dtype="i",
                         data=data.y,
                     )
-                    hdf5_file.create_dataset(
-                        os.path.join(hdf5_path, "idx_in_original_cloud"),
+                    sample_group.create_dataset(
+                        "idx_in_original_cloud",
                         sample_idx.shape,
                         dtype="i",
                         data=sample_idx,
                     )
 
-                # A termination flag to report that all samples for this point cloud were included in the df5 file.
+                # A termination flag to report that all samples for this point cloud were included in the hdf5 file.
                 # Group may not have been created if source cloud had no patch passing the pre_filter step, hence the "if" here.
                 if basename in hdf5_file[split]:
                     hdf5_file[split][basename].attrs["is_complete"] = True

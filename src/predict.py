@@ -12,12 +12,12 @@ from src.models.model import Model
 
 sys.path.append(osp.dirname(osp.dirname(__file__)))
 from src.models.interpolation import Interpolator  # noqa
-from src.utils import utils  # noqa
+from src.utils import utils, logging_utils  # noqa
 
 log = utils.get_logger(__name__)
 
 
-@utils.eval_time
+@logging_utils.eval_time
 def predict(config: DictConfig) -> str:
     """
     Inference pipeline.

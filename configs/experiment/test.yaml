@@ -18,7 +18,7 @@ datamodule:
   batch_size: 50 
 
 model:
-  ckpt_path: "path/to/checkpoint"  # override
+  ckpt_path: "assets/"  # override
 
 trainer:
   num_sanity_val_steps: 0

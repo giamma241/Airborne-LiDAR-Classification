@@ -5,12 +5,11 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
 import pdal
 import torch
+from pdaltools import las_info
 from torch.distributions import Categorical
 from torch_scatter import scatter_sum
 
-from pdaltools import las_info
-
-from myria3d.pctl.dataset.utils import get_pdal_info_metadata, get_pdal_reader
+from src.pctl.dataset.utils import get_pdal_info_metadata, get_pdal_reader
 
 log = logging.getLogger(__name__)
 
