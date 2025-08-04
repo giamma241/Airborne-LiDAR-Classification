@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from src.pctl.dataset.hdf5 import create_hdf5
 from src.pctl.dataset.utils import get_las_paths_by_split_dict
-from src.utils import utils
+from src.utils import rich_utils, utils
 
 TASK_NAME_DETECTION_STRING = "task.task_name="
 DEFAULT_DIRECTORY = "assets/"
@@ -53,7 +53,7 @@ def launch_train(
 
     # Pretty print config using Rich library
     if config.get("print_config"):
-        utils.print_config(config, resolve=False)
+        rich_utils.print_config(config, resolve=False)
     return train(config)
 
 
@@ -72,7 +72,7 @@ def launch_predict(config: DictConfig):
 
     # Pretty print config using Rich library
     if config.get("print_config"):
-        utils.print_config(config, resolve=False)
+        rich_utils.print_config(config, resolve=False)
 
     # Iterate over the files and predict.
     src_las_iterable = glob(config.predict.src_las)
@@ -86,7 +86,7 @@ def launch_hdf5(config: DictConfig):
 
     # Pretty print config using Rich library
     if config.get("print_config"):
-        utils.print_config(config, resolve=False)
+        rich_utils.print_config(config, resolve=False)
 
     las_paths_by_split_dict = get_las_paths_by_split_dict(
         config.datamodule.get("data_dir"), config.datamodule.get("split_csv_path")
