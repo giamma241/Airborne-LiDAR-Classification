@@ -110,15 +110,15 @@ hydra:
     hydra:
     - hydra.run.dir=C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification
     task:
-    - predict.ckpt_path=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-23\training_logs_dir0\epoch_000.ckpt
+    - predict.ckpt_path=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\training_logs_dir0\epoch_000.ckpt
     - datamodule.epsg=2154
     - predict.src_las=C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification\tests\data\single-point-cloud.laz
-    - predict.output_dir=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-23\test_predict_on_single_point_c0
+    - predict.output_dir=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\test_predict_on_single_point_c0
     - +predict.interpolator.probas_to_save=[building,unclassified]
     - task.task_name=predict
   job:
     name: run
-    override_dirname: +predict.interpolator.probas_to_save=[building,unclassified],datamodule.epsg=2154,predict.ckpt_path=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-23\training_logs_dir0\epoch_000.ckpt,predict.output_dir=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-23\test_predict_on_single_point_c0,predict.src_las=C:\Users\gianm\Documents\Uni\Big
+    override_dirname: +predict.interpolator.probas_to_save=[building,unclassified],datamodule.epsg=2154,predict.ckpt_path=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\training_logs_dir0\epoch_000.ckpt,predict.output_dir=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\test_predict_on_single_point_c0,predict.src_las=C:\Users\gianm\Documents\Uni\Big
       Data\report\airborne-lidar-classification\tests\data\single-point-cloud.laz,task.task_name=predict
     id: ???
     num: ???

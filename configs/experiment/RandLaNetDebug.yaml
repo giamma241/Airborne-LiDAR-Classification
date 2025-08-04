@@ -1,7 +1,7 @@
 # @package _global_
 
 # Nota : may need to call
-#   python myria3d/pctl/dataset/toy_dataset.py
+#   python src/pctl/dataset/toy_dataset.py
 # to create a toy dataset before running this.
 
 logger:
