@@ -1,132 +1,181 @@
-from typing import Any, Dict, List, Optional, Tuple
-
-import hydra
-import lightning as L
-import rootutils
-import torch
-from lightning import Callback, LightningDataModule, LightningModule, Trainer
-from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
-
-rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-# ------------------------------------------------------------------------------------ #
-# the setup_root above is equivalent to:
-# - adding project root dir to PYTHONPATH
-#       (so you don't need to force user to install project as a package)
-#       (necessary before importing any local modules e.g. `from src import utils`)
-# - setting up PROJECT_ROOT environment variable
-#       (which is used as a base for paths in "configs/paths/default.yaml")
-#       (this way all filepaths are the same no matter where you run the code)
-# - loading environment variables from ".env" in root dir
-#
-# you can remove it if you:
-# 1. either install project as a package or move entry files to project root dir
-# 2. set `root_dir` to "." in "configs/paths/default.yaml"
-#
-# more info: https://github.com/ashleve/rootutils
-# ------------------------------------------------------------------------------------ #
-
-from src.utils import (
-    RankedLogger,
-    extras,
-    get_metric_value,
-    instantiate_callbacks,
-    instantiate_loggers,
-    log_hyperparameters,
-    task_wrapper,
-)
-
-log = RankedLogger(__name__, rank_zero_only=True)
-
-
-@task_wrapper
-def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
-    training.
-
-    This method is wrapped in optional @task_wrapper decorator, that controls the behavior during
-    failure. Useful for multiruns, saving info about the crash, etc.
-
-    :param cfg: A DictConfig configuration composed by Hydra.
-    :return: A tuple with metrics and dict with all instantiated objects.
-    """
-    # set seed for random number generators in pytorch, numpy and python.random
-    if cfg.get("seed"):
-        L.seed_everything(cfg.seed, workers=True)
-
-    log.info(f"Instantiating datamodule <{cfg.data._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
-
-    log.info(f"Instantiating model <{cfg.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(cfg.model)
-
-    log.info("Instantiating callbacks...")
-    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
-
-    log.info("Instantiating loggers...")
-    logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
-
-    log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
-
-    object_dict = {
-        "cfg": cfg,
-        "datamodule": datamodule,
-        "model": model,
-        "callbacks": callbacks,
-        "logger": logger,
-        "trainer": trainer,
-    }
-
-    if logger:
-        log.info("Logging hyperparameters!")
-        log_hyperparameters(object_dict)
-
-    if cfg.get("train"):
-        log.info("Starting training!")
-        trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
-
-    train_metrics = trainer.callback_metrics
-
-    if cfg.get("test"):
-        log.info("Starting testing!")
-        ckpt_path = trainer.checkpoint_callback.best_model_path
-        if ckpt_path == "":
-            log.warning("Best ckpt not found! Using current weights for testing...")
-            ckpt_path = None
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-        log.info(f"Best ckpt path: {ckpt_path}")
-
-    test_metrics = trainer.callback_metrics
-
-    # merge train and test metrics
-    metric_dict = {**train_metrics, **test_metrics}
-
-    return metric_dict, object_dict
-
-
-@hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
-def main(cfg: DictConfig) -> Optional[float]:
-    """Main entry point for training.
-
-    :param cfg: DictConfig configuration composed by Hydra.
-    :return: Optional[float] with optimized metric value.
-    """
-    # apply extra utilities
-    # (e.g. ask for tags if none are provided in cfg, print cfg tree, etc.)
-    extras(cfg)
-
-    # train the model
-    metric_dict, _ = train(cfg)
-
-    # safely retrieve metric value for hydra-based hyperparameter optimization
-    metric_value = get_metric_value(
-        metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
+try:
+    # It is safer to import comet before all other imports.
+    import comet_ml  # noqa
+except ImportError:
+    print(
+        "Warning: package comet_ml not found. This may break things if you use a comet callback."
     )
 
-    # return optimized metric
-    return metric_value
+import copy
+import os
+from typing import List
+
+import hydra
+from omegaconf import DictConfig
+from pytorch_lightning import (
+    Callback,
+    LightningDataModule,
+    LightningModule,
+    Trainer,
+    seed_everything,
+)
+from pytorch_lightning.loggers.logger import Logger
+
+from run import TASK_NAMES
+from src.models.model import Model
+from src.utils import logging_utils, utils
+
+log = utils.get_logger(__name__)
+
+NEURAL_NET_ARCHITECTURE_CONFIG_GROUP = "neural_net"
 
 
-if __name__ == "__main__":
-    main()
+def train(config: DictConfig) -> Trainer:
+    """Training pipeline (+ Test, + Finetuning)
+
+    Instantiates all PyTorch Lightning objects from config, then perform one of the following
+    task based on parameter `task.task_name`:
+
+    fit:
+        Fits a neural network - train on a prepared training set and validate on a prepared validation set.
+        Optionnaly, resume a checkpointed training by specifying config.model.ckpt_path.
+
+    test:
+        Tests a trained neural network on the test dataset of a prepared dataset (i.e. the `test` subdir
+        which contains LAS files with a classification).
+
+    finetune:
+        Finetunes a checkpointed neural network on a prepared dataset, which muste be specified
+        in config.model.ckpt_path.
+        In contrast to using fit, finetuning resumes training with altered conditions. This leads to a new,
+        distinct training, and training state is reset (e.g. epoch starts from 0).
+
+    Typical use case are
+
+        - a different learning rate (config.model.lr) or a different scheduler (e.g. stronger config.model.lr_scheduler.patience)
+        - a different number of classes to predict, in order to e.g. specialize a base model. \
+        This is done by specifying a new config.dataset_description as well as the corresponding config.model.num_classes. \
+        for RecudeLROnPlateau scheduler). Additionnaly, a specific callback must be activated to change neural net output layer \
+        after loading its weights. See configs/experiment/RandLaNetDebugFineTune.yaml for an example.
+
+
+    Args:
+        config (DictConfig): Configuration composed by Hydra.
+
+    Returns:
+        Trainer: lightning trainer.
+
+    """
+
+    # Set seed for random number generators in pytorch, numpy and python.random
+    if "seed" in config:
+        seed_everything(config.seed, workers=True)
+
+    # Init lightning datamodule
+    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+
+    log.info(f"Instantiating model <{config.model._target_}>")
+    model: LightningModule = hydra.utils.instantiate(config.model)
+
+    # Init lightning callbacks
+    callbacks: List[Callback] = []
+    if "callbacks" in config:
+        for cb_conf in config.callbacks.values():
+            if "_target_" in cb_conf:
+                log.info(f"Instantiating callback <{cb_conf._target_}>")
+                callbacks.append(hydra.utils.instantiate(cb_conf))
+
+    # Init lightning loggers
+    logger: List[Logger] = []
+    if "logger" in config:
+        for lg_conf in config.logger.values():
+            if "_target_" in lg_conf:
+                log.info(f"Instantiating logger <{lg_conf._target_}>")
+                logger.append(hydra.utils.instantiate(lg_conf))
+
+    # Init lightning trainer
+    log.info(f"Instantiating trainer <{config.trainer._target_}>")
+    trainer: Trainer = hydra.utils.instantiate(
+        config.trainer, callbacks=callbacks, logger=logger
+    )
+
+    # Send some parameters from config to all lightning loggers
+    log.info("Logging hyperparameters!")
+    logging_utils.log_hyperparameters(
+        config=config,
+        model=model,
+        datamodule=datamodule,
+        trainer=trainer,
+        callbacks=callbacks,
+        logger=logger,
+    )
+
+    task_name = config.task.get("task_name")
+    if task_name == TASK_NAMES.FIT.value:
+        if config.task.auto_lr_find:
+            log.info("Finding best lr with auto_lr_find!")
+            # Run learn ing rate finder
+            lr_finder = trainer.tuner.lr_find(
+                model,
+                datamodule=datamodule,
+                min_lr=1e-6,
+                max_lr=3,
+                num_training=200,
+                mode="exponential",
+            )
+
+            # Results can be found in
+            lr_finder.results
+
+            # Plot with
+            fig = lr_finder.plot(suggest=True)
+            fig.show()
+            # Pick point based on plot, or get suggestion
+            new_lr = lr_finder.suggestion()
+
+            os.makedirs("./hpo/", exist_ok=True)
+            fig.savefig(
+                f"./hpo/lr_range_test_best_{new_lr:.5}.png",
+            )
+
+            # update hparams of the model
+            model.hparams.lr = new_lr
+            log.info(f"Best lr with auto_lr_find is {new_lr}")
+
+        log.info("Starting training and validating!")
+        trainer.fit(
+            model=model, datamodule=datamodule, ckpt_path=config.model.ckpt_path
+        )
+        log.info(f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}")
+        log.info("End of training and validating!")
+    if task_name in [TASK_NAMES.FIT.value, TASK_NAMES.TEST.value]:
+        log.info("Starting testing!")
+        if trainer.checkpoint_callback.best_model_path:
+            log.info(
+                f"Test will use just-trained best model checkpointed at \n {trainer.checkpoint_callback.best_model_path}"
+            )
+            config.model.ckpt_path = trainer.checkpoint_callback.best_model_path
+        log.info(
+            f"Test will use specified model checkpointed at \n {config.model.ckpt_path}"
+        )
+        trainer.test(
+            model=model, datamodule=datamodule, ckpt_path=config.model.ckpt_path
+        )
+        log.info("End of testing!")
+
+    if task_name == TASK_NAMES.FINETUNE.value:
+        log.info("Starting finetuning pretrained model on new data!")
+        # Instantiates the Model but overwrites everything with current config,
+        # except module related params (nnet architecture)
+        kwargs_to_override = copy.deepcopy(model.hparams)
+        kwargs_to_override.pop(
+            NEURAL_NET_ARCHITECTURE_CONFIG_GROUP, None
+        )  # removes that key if it's there
+        model = Model.load_from_checkpoint(config.model.ckpt_path, **kwargs_to_override)
+        trainer.fit(model=model, datamodule=datamodule, ckpt_path=None)
+        log.info(f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}")
+        log.info("End of training and validating!")
+
+    # Returns the trainer for access to everything that was calculated.
+    return trainer

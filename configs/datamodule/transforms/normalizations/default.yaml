@@ -1,0 +1,11 @@
+# Do not scale positions to keep meter-space for neural network parameters
+
+NullifyLowestZ:
+  _target_: src.pctl.transforms.transforms.NullifyLowestZ
+
+NormalizePos:
+  _target_: src.pctl.transforms.transforms.NormalizePos
+  subtile_width: "${datamodule.subtile_width}"
+
+StandardizeRGBAndIntensity:
+  _target_: src.pctl.transforms.transforms.StandardizeRGBAndIntensity

@@ -1,22 +1,35 @@
-defaults:
-  - model_checkpoint
-  - early_stopping
-  - model_summary
-  - rich_progress_bar
-  - _self_
+# Override with "none" to deactivate. 
+
+log_code:
+  _target_: src.callbacks.comet_callbacks.LogCode
+  code_dir: ${work_dir}/src
+
+log_logs_dir:
+  _target_: src.callbacks.comet_callbacks.LogLogsPath
+
+lr_monitor:
+  _target_:  pytorch_lightning.callbacks.LearningRateMonitor
+  logging_interval: "step"
+  log_momentum: true
 
 model_checkpoint:
-  dirpath: ${paths.output_dir}/checkpoints
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  monitor: "val/loss_epoch" # name of the logged metric which determines when model is improving
+  mode: "min" # can be "max" or "min"
+  save_top_k: 1 # save k best models (determined by above metric)
+  save_last: True # additionaly always save model from last epoch
+  verbose: True
+  dirpath: "checkpoints/"
   filename: "epoch_{epoch:03d}"
-  monitor: "val/acc"
-  mode: "max"
-  save_last: True
   auto_insert_metric_name: False
 
 early_stopping:
-  monitor: "val/acc"
-  patience: 100
-  mode: "max"
-
-model_summary:
-  max_depth: -1
+  _target_: pytorch_lightning.callbacks.EarlyStopping
+  monitor: "val/loss_epoch" # name of the logged metric which determines when model is improving
+  mode: "min" # can be "max" or "min"
+  patience: 6 # how many validation epochs of not improving until training stops
+  min_delta: 0 # minimum change in the monitored metric needed to qualify as an improvement
+  
+model_detailed_metrics:
+  _target_: src.callbacks.metric_callbacks.ModelMetrics
+  num_classes: ${model.num_classes}

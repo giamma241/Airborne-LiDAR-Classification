@@ -1,8 +1,14 @@
+# TO-DO
+
 # --------- pytorch --------- #
 torch>=2.0.0
 torchvision>=0.15.0
 lightning>=2.0.0
 torchmetrics>=0.11.4
+pyg_lib -f https://data.pyg.org/whl/torch-${2.7.0}+${cu128}.html
+torch_scatter -f https://data.pyg.org/whl/torch-${2.7.0}+${cu128}.html
+torch_cluster -f https://data.pyg.org/whl/torch-${2.7.0}+${cu128}.html
+torch_geometric
 
 # --------- hydra --------- #
 hydra-core==1.3.2
@@ -31,3 +37,10 @@ scikit-learn
 tensorflow
 pyyaml
 jupyter
+plyfile
+h5py
+colorhash
+seaborn
+numba
+gdown
+ipyfilechooser

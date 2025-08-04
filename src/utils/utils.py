@@ -2,42 +2,70 @@ import warnings
 from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from omegaconf import DictConfig
+import torch
+from omegaconf import DictConfig, OmegaConf
 
-from src.utils import pylogger, rich_utils
+from src.utils import pylogger
+
+from .logging_utils import get_logger
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
+# def extras(cfg: DictConfig) -> None:
+#     """Applies optional utilities before the task is started.
 
-def extras(cfg: DictConfig) -> None:
-    """Applies optional utilities before the task is started.
+#     Utilities:
+#         - Ignoring python warnings
+#         - Setting tags from command line
+#         - Rich config printing
 
-    Utilities:
-        - Ignoring python warnings
-        - Setting tags from command line
-        - Rich config printing
+#     :param cfg: A DictConfig object containing the config tree.
+#     """
+#     # return if no `extras` config
+#     if not cfg.get("extras"):
+#         log.warning("Extras config not found! <cfg.extras=null>")
+#         return
 
-    :param cfg: A DictConfig object containing the config tree.
+#     # disable python warnings
+#     if cfg.extras.get("ignore_warnings"):
+#         log.info("Disabling python warnings! <cfg.extras.ignore_warnings=True>")
+#         warnings.filterwarnings("ignore")
+
+#     # prompt user to input tags from command line if none are provided in the config
+#     if cfg.extras.get("enforce_tags"):
+#         log.info("Enforcing tags! <cfg.extras.enforce_tags=True>")
+#         rich_utils.enforce_tags(cfg, save_to_file=True)
+
+#     # pretty print config tree using Rich library
+#     if cfg.extras.get("print_config"):
+#         log.info("Printing config tree with Rich! <cfg.extras.print_config=True>")
+#         rich_utils.print_config_tree(cfg, resolve=True, save_to_file=True)
+
+
+def extras(config: DictConfig) -> None:
+    """A couple of optional utilities, controlled by main config file:
+    - disabling warnings
+    - easier access to debug mode
+    - forcing debug friendly configuration
+
+    Modifies DictConfig in place.
+
+    Args:
+        config (DictConfig): Configuration composed by Hydra.
     """
-    # return if no `extras` config
-    if not cfg.get("extras"):
-        log.warning("Extras config not found! <cfg.extras=null>")
-        return
 
-    # disable python warnings
-    if cfg.extras.get("ignore_warnings"):
-        log.info("Disabling python warnings! <cfg.extras.ignore_warnings=True>")
+    log = get_logger()
+
+    # enable adding new keys to config
+    OmegaConf.set_struct(config, False)
+
+    # disable python warnings if <config.ignore_warnings=True>
+    if config.get("ignore_warnings"):
+        log.debug("Disabling python warnings! <config.ignore_warnings=True>")
         warnings.filterwarnings("ignore")
 
-    # prompt user to input tags from command line if none are provided in the config
-    if cfg.extras.get("enforce_tags"):
-        log.info("Enforcing tags! <cfg.extras.enforce_tags=True>")
-        rich_utils.enforce_tags(cfg, save_to_file=True)
-
-    # pretty print config tree using Rich library
-    if cfg.extras.get("print_config"):
-        log.info("Printing config tree with Rich! <cfg.extras.print_config=True>")
-        rich_utils.print_config_tree(cfg, resolve=True, save_to_file=True)
+    # disable adding new keys to config
+    OmegaConf.set_struct(config, True)
 
 
 def task_wrapper(task_func: Callable) -> Callable:
@@ -117,3 +145,15 @@ def get_metric_value(metric_dict: Dict[str, Any], metric_name: Optional[str]) ->
     log.info(f"Retrieved metric value! <{metric_name}={metric_value}>")
 
     return metric_value
+
+def define_device_from_config_param(gpus_param):
+    """
+    Param can be an in specifying a number of GPU to use (0 or 1) or an int in
+    a list specifying which GPU to use (cuda:0, cuda:1, etc.)
+    """
+    device = (
+        torch.device("cpu")
+        if gpus_param == 0
+        else (torch.device("cuda") if gpus_param == 1 else f"cuda:{int(gpus_param[0])}")
+    )
+    return device

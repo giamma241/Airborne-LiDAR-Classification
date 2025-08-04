@@ -7,7 +7,7 @@ import sys
 from typing import Any, Dict, Optional
 
 import pytest
-import torch
+from lightning.pytorch.accelerators import find_usable_cuda_devices
 from packaging.version import Version
 from pkg_resources import get_distribution
 from pytest import MarkDecorator
@@ -78,8 +78,14 @@ class RunIf:
         reasons = []
 
         if min_gpus:
-            conditions.append(torch.cuda.device_count() < min_gpus)
-            reasons.append(f"GPUs>={min_gpus}")
+            # conditions.append(torch.cuda.device_count() < min_gpus)
+            # reasons.append(f"GPUs>={min_gpus}")
+            try:
+                find_usable_cuda_devices(min_gpus)
+                conditions.append(False)
+            except (ValueError, RuntimeError):
+                conditions.append(True)
+                reasons.append(f"GPUs>={min_gpus}")
 
         if min_torch:
             torch_version = get_distribution("torch").version

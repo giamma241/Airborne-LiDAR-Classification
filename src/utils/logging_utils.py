@@ -1,57 +1,84 @@
-from typing import Any, Dict
+import logging
+import time
+from typing import List
 
+import pytorch_lightning as pl
 from lightning_utilities.core.rank_zero import rank_zero_only
-from omegaconf import OmegaConf
+from omegaconf import DictConfig
 
 from src.utils import pylogger
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
+def get_logger(name=__name__) -> logging.Logger:
+    """Initializes multi-GPU-friendly python logger."""
+
+    logger = logging.getLogger(name)
+
+    # this ensures all logging levels get marked with the rank zero decorator
+    # otherwise logs would get multiplied for each GPU process in multi-GPU setup
+    for level in (
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "exception",
+        "fatal",
+        "critical",
+    ):
+        setattr(logger, level, rank_zero_only(getattr(logger, level)))
+
+    return logger
+
+
+def empty(*args, **kwargs):
+    pass
+
+
 @rank_zero_only
-def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
-    """Controls which config parts are saved by Lightning loggers.
+def log_hyperparameters(
+    config: DictConfig,
+    model: pl.LightningModule,
+    datamodule: pl.LightningDataModule,
+    trainer: pl.Trainer,
+    callbacks: List[pl.Callback],
+    logger: List[pl.loggers.Logger],
+) -> None:
+    """Log select config fields + model parameter counts to Lightning loggers."""
 
-    Additionally saves:
-        - Number of model parameters
+    hparams = {
+        "trainer": config["trainer"],
+        "model": config["model"],
+        "datamodule": config["datamodule"],
+    }
 
-    :param object_dict: A dictionary containing the following objects:
-        - `"cfg"`: A DictConfig object containing the main config.
-        - `"model"`: The Lightning model.
-        - `"trainer"`: The Lightning trainer.
-    """
-    hparams = {}
+    if "seed" in config:
+        hparams["seed"] = config["seed"]
+    if "callbacks" in config:
+        hparams["callbacks"] = config["callbacks"]
 
-    cfg = OmegaConf.to_container(object_dict["cfg"])
-    model = object_dict["model"]
-    trainer = object_dict["trainer"]
-
-    if not trainer.logger:
-        log.warning("Logger not found! Skipping hyperparameter logging...")
-        return
-
-    hparams["model"] = cfg["model"]
-
-    # save number of model parameters
-    hparams["model/params/total"] = sum(p.numel() for p in model.parameters())
-    hparams["model/params/trainable"] = sum(
+    hparams["model/params_total"] = sum(p.numel() for p in model.parameters())
+    hparams["model/params_trainable"] = sum(
         p.numel() for p in model.parameters() if p.requires_grad
     )
-    hparams["model/params/non_trainable"] = sum(
+    hparams["model/params_not_trainable"] = sum(
         p.numel() for p in model.parameters() if not p.requires_grad
     )
 
-    hparams["data"] = cfg["data"]
-    hparams["trainer"] = cfg["trainer"]
+    trainer.logger.log_hyperparams(hparams)
+    trainer.logger.log_hyperparams = empty  # block further logging
 
-    hparams["callbacks"] = cfg.get("callbacks")
-    hparams["extras"] = cfg.get("extras")
 
-    hparams["task_name"] = cfg.get("task_name")
-    hparams["tags"] = cfg.get("tags")
-    hparams["ckpt_path"] = cfg.get("ckpt_path")
-    hparams["seed"] = cfg.get("seed")
+def eval_time(method):
+    """Decorator to log the duration of the decorated method."""
 
-    # send hparams to all loggers
-    for logger in trainer.loggers:
-        logger.log_hyperparams(hparams)
+    def timed(*args, **kwargs):
+        log = get_logger()
+        time_start = time.time()
+        result = method(*args, **kwargs)
+        time_elapsed = round(time.time() - time_start, 2)
+        log.info(f"Runtime of {method.__name__}: {time_elapsed}s")
+        return result
+
+    return timed
