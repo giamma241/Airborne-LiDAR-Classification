@@ -1,0 +1,28 @@
+_target_: src.pctl.datamodule.hdf5.HDF5LidarDataModule
+data_dir: null
+epsg: 32633  # Set your EPSG here
+split_csv_path: null
+hdf5_file_path: "path/to/dataset_file.hdf5"
+
+# Custom preprocessing for RGB-only data
+points_pre_transform:
+  _target_: functools.partial
+  _args_:
+    - "${get_method:src.pctl.points_pre_transform.rgb_only_transform.rgb_only_pre_transform}"
+
+pre_filter:
+  _target_: functools.partial
+  _args_:
+    - "${get_method:src.pctl.dataset.utils.pre_filter_below_n_points}"
+  min_num_nodes: 1
+
+tile_width: 1000
+subtile_width: 50
+subtile_overlap_train: 0
+subtile_overlap_predict: "${predict.subtile_overlap}"
+batch_size: 32
+num_workers: 3
+prefetch_factor: 3
+
+defaults:
+  - transforms: default.yaml
