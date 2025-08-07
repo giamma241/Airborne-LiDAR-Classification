@@ -1,0 +1,7 @@
+- task.task_name=predict
+- predict.src_las=data\colorized_las_rgb\merged_rgb.las
+- predict.output_dir=data/test
+- +ckpt_path=assets/proto151_V2.0_epoch_100_Myria3DV3.1.0.ckpt
+- predict.gpus=1
+- logger.comet.disabled=true
+- datamodule.epsg=32633
