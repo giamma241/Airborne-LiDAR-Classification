@@ -261,8 +261,8 @@ task:
   auto_lr_find: false
 predict:
   src_las: C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification\tests\data\single-point-cloud.laz
-  output_dir: C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\test_predict_on_single_point_c0
-  ckpt_path: C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-24\training_logs_dir0\epoch_000.ckpt
+  output_dir: C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-26\test_predict_on_single_point_c0
+  ckpt_path: C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-26\training_logs_dir0\epoch_000.ckpt
   subtile_overlap: 0
   gpus: 0
   interpolator:
