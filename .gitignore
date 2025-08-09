@@ -150,6 +150,8 @@ data/*
 !data/.gitkeep
 /data/
 /logs/
+/outputs/
+/outputs/*
 .env
 notebooks/00_tester.ipynb
 
