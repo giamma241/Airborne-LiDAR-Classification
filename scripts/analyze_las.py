@@ -7,13 +7,38 @@ This notebook analyzes your LAS file to understand its structure and
 compatibility with Myria3D requirements.
 """
 
+import os
+import sys
 from collections import Counter
 
 import laspy
 import numpy as np
+import pandas as pd
 
-# File path to your LAS file (adjusted for notebook being in notebooks/ folder)
-las_file_path = "../data/colorized_las/merged_colorized.las"
+
+# Detect if running in Jupyter
+def is_jupyter():
+    try:
+        __IPYTHON__
+        return True
+    except NameError:
+        return False
+
+
+# File path to your LAS file
+if is_jupyter():
+    # In Jupyter, set the path directly here
+    las_file_path = "../data/colorized_las_rgb/merged_rgb.las"
+    # Or use an environment variable if you want to change it easily
+    las_file_path = os.getenv("LAS_FILE_PATH", las_file_path)
+    export_csv = os.getenv("EXPORT_CSV", "false").lower() == "true"
+else:
+    # Command line usage
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
+        las_file_path = sys.argv[1]
+    else:
+        las_file_path = "../data/colorized_las_rgb/merged_rgb.las"
+    export_csv = "--export-csv" in sys.argv
 
 print("=== LAS FILE ANALYSIS ===\n")
 
@@ -39,7 +64,6 @@ try:
         # Alternative method for newer laspy versions
         try:
             import os
-
             file_size_gb = os.path.getsize(las_file_path) / (1024**3)
             print(f"File size: {file_size_gb:.2f} GB")
         except:
@@ -54,8 +78,6 @@ try:
     print(
         f"Max coordinates: X={las.header.max[0]:.2f}, Y={las.header.max[1]:.2f}, Z={las.header.max[2]:.2f}"
     )
-    # print(f"Scale factors: X={las.header.x_scale_factor}, Y={las.header.y_scale_factor}, Z={las.header.z_scale_factor}")
-    # print(f"Offset: X={las.header.x_offset}, Y={las.header.y_offset}, Z={las.header.z_offset}")
     print()
 
     # Check for coordinate system (EPSG)
@@ -166,18 +188,89 @@ try:
         print(f"   Return numbers: {set(las.return_number)}")
         print(f"   Max returns: {set(las.number_of_returns)}")
 
-    # Check for classification
+    # Enhanced Classification Analysis
     has_classification = "classification" in dimensions
     print(
         f"{'✅' if has_classification else '❌'} Classification: {has_classification}"
     )
     if has_classification:
         class_counts = Counter(las.classification)
+
+        # Standard ASPRS classification labels
+        asprs_classes = {
+            0: "Created, never classified",
+            1: "Unclassified",
+            2: "Ground",
+            3: "Low Vegetation",
+            4: "Medium Vegetation",
+            5: "High Vegetation",
+            6: "Building",
+            7: "Low Point (noise)",
+            8: "Reserved",
+            9: "Water",
+            10: "Rail",
+            11: "Road Surface",
+            12: "Reserved",
+            13: "Wire - Guard (Shield)",
+            14: "Wire - Conductor (Phase)",
+            15: "Transmission Tower",
+            16: "Wire-structure Connector",
+            17: "Bridge Deck",
+            18: "High Noise",
+            19: "Overhead Structure",
+            20: "Ignored Ground",
+            64: "Lasting Above",  # Myria3D specific
+            65: "Temporal above",  # Additional Myria3D
+        }
+
+        print(f"   Total unique classes: {len(class_counts)}")
         print(f"   Classification codes present: {sorted(class_counts.keys())}")
-        print("   Point distribution by class:")
-        for class_code, count in sorted(class_counts.items()):
+        print("\n   Point distribution by class:")
+        print(f"   {'Class':>6} | {'Name':<35} | {'Points':>12} | {'Percentage':>10}")
+        print(f"   {'-' * 6}-+-{'-' * 35}-+-{'-' * 12}-+-{'-' * 10}")
+
+        # Sort by count (descending) to show most common classes first
+        sorted_classes = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
+
+        for class_code, count in sorted_classes:
             percentage = (count / len(las.points)) * 100
-            print(f"     Class {class_code}: {count:,} points ({percentage:.1f}%)")
+            class_name = asprs_classes.get(class_code, "Unknown/Custom")
+            print(
+                f"   {class_code:6d} | {class_name:<35} | {count:12,} | {percentage:9.2f}%"
+            )
+
+        # Summary statistics
+        print("\n   Classification Summary:")
+        most_common = sorted_classes[0]
+        print(
+            f"     - Most common: Class {most_common[0]} ({asprs_classes.get(most_common[0], 'Unknown')})"
+        )
+        print(
+            f"       with {most_common[1]:,} points ({100 * most_common[1] / len(las.points):.2f}%)"
+        )
+
+        if len(sorted_classes) > 1:
+            least_common = sorted_classes[-1]
+            print(
+                f"     - Least common: Class {least_common[0]} ({asprs_classes.get(least_common[0], 'Unknown')})"
+            )
+            print(
+                f"       with {least_common[1]:,} points ({100 * least_common[1] / len(las.points):.2f}%)"
+            )
+
+        # Check if classification seems to be meaningful
+        unique_classes = set(class_counts.keys())
+        if unique_classes == {0} or unique_classes == {1}:
+            print(
+                f"\n   ⚠️  WARNING: All points have the same classification ({list(unique_classes)[0]})"
+            )
+            print("      The file may not have been classified yet.")
+            print(
+                "      Consider running a classification algorithm before using with Myria3D."
+            )
+        elif unique_classes.issubset({0, 1}):
+            print("\n   ⚠️  WARNING: Only unclassified points found (classes 0 and 1)")
+            print("      The file appears to be unclassified.")
 
     print()
 
@@ -234,6 +327,19 @@ try:
     print(f"   Y: {las.header.max[1] - las.header.min[1]:.2f} units")
     print(f"   Z: {las.header.max[2] - las.header.min[2]:.2f} units")
 
+    # Estimate area (assuming units are meters)
+    area_hectares = (
+        (las.header.max[0] - las.header.min[0])
+        * (las.header.max[1] - las.header.min[1])
+        / 10000
+    )
+    print(f"   Approximate area: {area_hectares:.2f} hectares (assuming meters)")
+
+    # Point density
+    if area_hectares > 0:
+        point_density = len(las.points) / area_hectares
+        print(f"   Point density: {point_density:.0f} points/hectare")
+
     # Sample a few points for inspection
     print("\n=== SAMPLE POINTS ===")
     sample_size = min(5, len(las.points))
@@ -246,7 +352,9 @@ try:
         if has_intensity:
             point_info += f", I={las.intensity[i]}"
         if has_classification:
-            point_info += f", Class={las.classification[i]}"
+            class_code = las.classification[i]
+            class_name = asprs_classes.get(class_code, "Unknown")
+            point_info += f", Class={class_code} ({class_name})"
         print(f"   {point_info}")
 
     print()
@@ -262,20 +370,44 @@ try:
         print()
 
     print("🚀 SUGGESTED COMMAND:")
-    command = f"""python run.py task.task_name=predict \\
-    predict.src_las="{las_file_path}" \\
-    predict.output_dir="data/test" \\
-    +ckpt_path="assets/proto151_V2.0_epoch_100_Myria3DV3.1.0.ckpt" \\
-    predict.gpus=1 \\
-    logger.comet.disabled=true"""
+    # Detect if path needs adjustment
+    if "../" in las_file_path:
+        adjusted_path = las_file_path.replace("../", "")
+    else:
+        adjusted_path = las_file_path
 
-    # Add EPSG if we couldn't find it
-    command += " \\\n    datamodule.epsg=YOUR_EPSG_CODE  # Replace with actual EPSG"
+    command = f"""python run.py task.task_name=predict \\
+    predict.src_las="{adjusted_path}" \\
+    predict.output_dir="data/test" \\
+    predict.ckpt_path="assets/model_Myria3DV3.1.0.ckpt" \\
+    datamodule.epsg=32633 \\
+    datamodule.hdf5_file_path=null \\
+    datamodule.num_workers=0 \\
+    logger.comet.disabled=true"""
 
     if missing_features:
         command += " \\\n    datamodule.points_pre_transform=your_custom_transform"
 
     print(command)
+
+    # Export classification summary to CSV if requested
+    if has_classification and export_csv:
+        csv_filename = las_file_path.replace(".las", "_classification.csv").replace(
+            ".laz", "_classification.csv"
+        )
+        classification_df = pd.DataFrame(
+            [
+                {
+                    "Class_Code": code,
+                    "Class_Name": asprs_classes.get(code, "Unknown/Custom"),
+                    "Point_Count": count,
+                    "Percentage": (count / len(las.points)) * 100,
+                }
+                for code, count in sorted_classes
+            ]
+        )
+        classification_df.to_csv(csv_filename, index=False)
+        print(f"\n📊 Classification summary exported to: {csv_filename}")
 
 except FileNotFoundError:
     print(f"❌ File not found: {las_file_path}")
@@ -283,7 +415,19 @@ except FileNotFoundError:
 
 except Exception as e:
     print(f"❌ Error reading LAS file: {e}")
-    print("Make sure you have laspy installed: pip install laspy")
+    import traceback
+
+    traceback.print_exc()
+    print("\nMake sure you have laspy installed: pip install laspy")
 
 print("\n" + "=" * 50)
 print("Analysis complete! Review the results above.")
+
+if not is_jupyter():
+    print("\nUsage: python analyze_las.py [path_to_las_file] [--export-csv]")
+else:
+    print("\nJupyter Usage:")
+    print(
+        "  To analyze a different file, change las_file_path variable or set LAS_FILE_PATH env var"
+    )
+    print("  To export CSV: set EXPORT_CSV='true' environment variable")
