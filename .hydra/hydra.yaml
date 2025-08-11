@@ -111,7 +111,7 @@ hydra:
     - hydra.run.dir=C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification
     task:
     - predict.ckpt_path=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-26\training_logs_dir0\epoch_000.ckpt
-    - datamodule.epsg=2154
+    - datamodule.epsg=32633
     - predict.src_las=C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification\tests\data\single-point-cloud.laz
     - predict.output_dir=C:\Users\gianm\AppData\Local\Temp\pytest-of-gianm\pytest-26\test_predict_on_single_point_c0
     - +predict.interpolator.probas_to_save=[building,unclassified]
