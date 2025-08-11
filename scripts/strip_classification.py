@@ -1,170 +1,249 @@
 #!/usr/bin/env python3
 """
-PDAL-based LAS Cleaner
-======================
+Batch LAS/LAZ Cleaner
+=====================
 
-Obiettivo:
-- Azzerare il campo standard LAS 'Classification' (non rimovibile dallo standard).
-- Rimuovere eventuali extra dimensions come 'PredictedClassification', 'entropy', 'building', 'ground', ecc.
+Process all LAS/LAZ files in a folder using the strip_classification script.
 
-Uso:
-  python strip_classification.py --in input.las --out output.las
-  # opzionale: specificare quali extra-dims rimuovere
-  python strip_classification.py --in input.las --out output.las --drop PredictedClassification entropy building ground
+Usage:
+    python batch_strip_classification.py --input-dir data/test --output-dir data/test_clean
+    python batch_strip_classification.py --input-dir data/test --output-dir data/test_clean --parallel 4
 """
 
 import argparse
-import json
 import logging
 import subprocess
 import sys
-import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Set
+from typing import Tuple
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
-log = logging.getLogger("pdal-cleaner")
+log = logging.getLogger("batch-cleaner")
 
 
-def check_pdal() -> None:
+def process_single_file(
+    input_file: Path,
+    output_dir: Path,
+    auto_drop: bool = True,
+    class_value: int = 1,
+    verbose: bool = False,
+) -> Tuple[bool, str]:
+    """Process a single LAS/LAZ file."""
+    output_file = output_dir / input_file.name
+
+    cmd = [
+        sys.executable,  # Use the same Python interpreter
+        "strip_classification.py",
+        "--in",
+        str(input_file),
+        "--out",
+        str(output_file),
+        "--class-value",
+        str(class_value),
+    ]
+
+    if auto_drop:
+        cmd.append("--auto-drop")
+
+    if verbose:
+        cmd.append("--verbose")
+
     try:
-        r = subprocess.run(
-            ["pdal", "--version"], capture_output=True, text=True, timeout=10
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minutes timeout per file
         )
-        if r.returncode != 0:
-            raise RuntimeError(r.stderr.strip())
-        log.info(f"PDAL: {r.stdout.strip()}")
-    except FileNotFoundError:
-        log.error("PDAL non trovato. Installa con: conda install -c conda-forge pdal")
-        sys.exit(1)
+
+        if result.returncode == 0:
+            return True, f"✅ {input_file.name}"
+        else:
+            return False, f"❌ {input_file.name}: {result.stderr.strip()}"
+    except subprocess.TimeoutExpired:
+        return False, f"⏱️ {input_file.name}: Timeout (>5 minutes)"
+    except Exception as e:
+        return False, f"❌ {input_file.name}: {str(e)}"
 
 
-def pdal_list_dims(las_path: Path) -> Set[str]:
-    """Ritorna l’insieme dei nomi dimensione presenti nel file (via `pdal info`)."""
-    cmd = ["pdal", "info", "--metadata", str(las_path)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        log.warning(
-            "Impossibile leggere metadata con pdal info; proseguo senza auto-rilevazione extra-dims."
-        )
-        return set()
+def process_folder(
+    input_dir: Path,
+    output_dir: Path,
+    pattern: str = "*.la[sz]",
+    auto_drop: bool = True,
+    class_value: int = 1,
+    parallel: int = 1,
+    verbose: bool = False,
+    overwrite: bool = False,
+) -> None:
+    """Process all LAS/LAZ files in a folder."""
+
+    # Find all files
+    las_files = list(input_dir.glob("*.las"))
+    laz_files = list(input_dir.glob("*.laz"))
+    all_files = las_files + laz_files
+
+    if not all_files:
+        log.warning(f"No LAS/LAZ files found in {input_dir}")
+        return
+
+    log.info(f"Found {len(all_files)} files to process")
+    log.info(f"Input directory: {input_dir}")
+    log.info(f"Output directory: {output_dir}")
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Filter out existing files if not overwriting
+    if not overwrite:
+        files_to_process = []
+        for f in all_files:
+            output_file = output_dir / f.name
+            if output_file.exists():
+                log.info(f"⏭️ Skipping {f.name} (output exists)")
+            else:
+                files_to_process.append(f)
+    else:
+        files_to_process = all_files
+
+    if not files_to_process:
+        log.info("No files to process (all outputs exist)")
+        return
+
+    log.info(f"Processing {len(files_to_process)} files...")
+
+    # Process files
+    success_count = 0
+    failed_count = 0
+
+    if parallel > 1:
+        # Parallel processing
+        log.info(f"Using {parallel} parallel workers")
+
+        with ProcessPoolExecutor(max_workers=parallel) as executor:
+            futures = {
+                executor.submit(
+                    process_single_file, f, output_dir, auto_drop, class_value, verbose
+                ): f
+                for f in files_to_process
+            }
+
+            for future in as_completed(futures):
+                success, message = future.result()
+                log.info(message)
+                if success:
+                    success_count += 1
+                else:
+                    failed_count += 1
+    else:
+        # Sequential processing
+        for i, f in enumerate(files_to_process, 1):
+            log.info(f"[{i}/{len(files_to_process)}] Processing {f.name}...")
+            success, message = process_single_file(
+                f, output_dir, auto_drop, class_value, verbose
+            )
+            log.info(message)
+            if success:
+                success_count += 1
+            else:
+                failed_count += 1
+
+    # Summary
+    log.info("=" * 50)
+    log.info("Processing complete!")
+    log.info(f"✅ Successful: {success_count}")
+    if failed_count > 0:
+        log.warning(f"❌ Failed: {failed_count}")
+
+    # Calculate total size reduction
     try:
-        meta = json.loads(r.stdout)
-        dims = meta.get("metadata", {}).get("readers.las", {}).get("dimensions", [])
-        return set(dims)
+        input_size = sum(f.stat().st_size for f in files_to_process) / (1024**3)
+        output_files = [output_dir / f.name for f in files_to_process]
+        output_size = sum(f.stat().st_size for f in output_files if f.exists()) / (
+            1024**3
+        )
+        reduction_pct = (1 - output_size / input_size) * 100 if input_size > 0 else 0
+
+        log.info(f"Total input size: {input_size:.2f} GB")
+        log.info(f"Total output size: {output_size:.2f} GB")
+        if reduction_pct > 0:
+            log.info(f"Size reduction: {reduction_pct:.1f}%")
     except Exception:
-        return set()
-
-
-def create_cleanup_pipeline(
-    input_las: Path, output_las: Path, dims_to_drop: List[str]
-) -> dict:
-    """
-    Crea pipeline PDAL:
-      readers.las -> (filters.drop?) -> filters.assign(Classification=1) -> writers.las
-    """
-    pipeline = [{"type": "readers.las", "filename": str(input_las.absolute())}]
-
-    # Se ci sono extra-dims da rimuovere, usa filters.drop
-    if dims_to_drop:
-        pipeline.append({"type": "filters.drop", "dimensions": ",".join(dims_to_drop)})
-
-    # Azzerare la Classification standard
-    # Nota: non si può eliminare, solo impostare il valore.
-    pipeline.append(
-        {
-            "type": "filters.assign",
-            "assignment": "Classification[:] = 1",  # oppure 1 per 'Unclassified'
-        }
-    )
-
-    # Scrittura
-    pipeline.append(
-        {
-            "type": "writers.las",
-            "filename": str(output_las.absolute()),
-            "minor_version": "4",  # LAS 1.4
-            "dataformat_id": "3",  # Point format 3 (XYZ, Intensity, Time, RGB)
-            "forward": "all",  # inoltra tutte le altre dimensioni
-        }
-    )
-    return {"pipeline": pipeline}
-
-
-def run_pipeline(pipeline: dict) -> bool:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(pipeline, f, indent=2)
-        tmp = Path(f.name)
-    try:
-        log.debug("Pipeline:\n" + json.dumps(pipeline, indent=2))
-        r = subprocess.run(
-            ["pdal", "pipeline", str(tmp)], capture_output=True, text=True
-        )
-        if r.returncode != 0:
-            log.error("PDAL pipeline fallita:\n" + r.stderr)
-            return False
-        return True
-    finally:
-        try:
-            tmp.unlink()
-        except Exception:
-            pass
+        pass
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rimuove extra-dims e azzera la Classification in un LAS/LAZ."
+        description="Batch process LAS/LAZ files to remove extra dimensions and reset classification."
     )
     parser.add_argument(
-        "--in", dest="in_path", required=True, type=Path, help="Input LAS/LAZ"
+        "--input-dir",
+        "-i",
+        type=Path,
+        required=True,
+        help="Input directory containing LAS/LAZ files",
     )
     parser.add_argument(
-        "--out", dest="out_path", required=True, type=Path, help="Output LAS/LAZ"
-    )
-    parser.add_argument(
-        "--drop",
-        nargs="*",
-        default=[],
-        help="Elenco extra-dims da rimuovere (es. PredictedClassification entropy building ground)",
+        "--output-dir",
+        "-o",
+        type=Path,
+        required=True,
+        help="Output directory for cleaned files",
     )
     parser.add_argument(
         "--auto-drop",
         action="store_true",
-        help="Auto-rileva e rimuove le extra-dims tipiche di predizione (PredictedClassification, entropy, building, ground).",
+        default=True,
+        help="Auto-detect and remove typical prediction dimensions (default: True)",
     )
+    parser.add_argument(
+        "--no-auto-drop",
+        dest="auto_drop",
+        action="store_false",
+        help="Don't auto-detect dimensions to remove",
+    )
+    parser.add_argument(
+        "--class-value",
+        type=int,
+        default=1,
+        help="Value to set for Classification field (default: 1)",
+    )
+    parser.add_argument(
+        "--parallel",
+        "-p",
+        type=int,
+        default=1,
+        help="Number of parallel workers (default: 1 = sequential)",
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing output files"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable verbose output"
+    )
+
     args = parser.parse_args()
 
-    check_pdal()
-
-    if not args.in_path.exists():
-        log.error(f"Input non trovato: {args.in_path}")
+    if not args.input_dir.exists():
+        log.error(f"Input directory not found: {args.input_dir}")
         sys.exit(1)
 
-    dims_to_drop: Set[str] = set(args.drop)
+    if not args.input_dir.is_dir():
+        log.error(f"Input path is not a directory: {args.input_dir}")
+        sys.exit(1)
 
-    if args.auto_drop:
-        present = pdal_list_dims(args.in_path)
-        # set “tipico” di extra-dims generate dall’inferenza
-        typical = {"PredictedClassification", "entropy", "building", "ground"}
-        dims_to_drop.update(typical.intersection(present))
-
-    pipeline = create_cleanup_pipeline(
-        args.in_path, args.out_path, sorted(dims_to_drop)
+    process_folder(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        auto_drop=args.auto_drop,
+        class_value=args.class_value,
+        parallel=args.parallel,
+        verbose=args.verbose,
+        overwrite=args.overwrite,
     )
-    ok = run_pipeline(pipeline)
-
-    if ok and args.out_path.exists():
-        size_mb = args.out_path.stat().st_size / (1024**2)
-        log.info(f"✅ Pulizia completata: {args.out_path} ({size_mb:.1f} MB)")
-        if dims_to_drop:
-            log.info("Rimosse extra-dims: " + ", ".join(sorted(dims_to_drop)))
-        log.info("Campo 'Classification' azzerato (0).")
-        sys.exit(0)
-    else:
-        log.error("❌ Operazione fallita.")
-        sys.exit(2)
 
 
 if __name__ == "__main__":
