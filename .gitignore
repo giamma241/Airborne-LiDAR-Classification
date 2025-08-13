@@ -149,7 +149,6 @@ configs/local/default.yaml
 data/*
 !data/.gitkeep
 /data/
-/logs/
 /outputs/
 /outputs/*
 .env
