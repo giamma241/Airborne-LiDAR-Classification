@@ -379,7 +379,7 @@ try:
     command = f"""python run.py task.task_name=predict \\
     predict.src_las="{adjusted_path}" \\
     predict.output_dir="data/test" \\
-    predict.ckpt_path="assets/model_Myria3DV3.1.0.ckpt" \\
+    predict.ckpt_path="configs/model/model_Myria3DV3.1.0.ckpt" \\
     datamodule.epsg=32633 \\
     datamodule.hdf5_file_path=null \\
     datamodule.num_workers=0 \\

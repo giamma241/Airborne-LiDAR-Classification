@@ -331,7 +331,7 @@ def main():
             print("2. Or add synthetic infrared channel separately")
             print("\nMyria3D command:")
             print(
-                f'python run.py task.task_name=predict predict.src_las="{merged_file}" datamodule.points_pre_transform._args_[0]="${{get_method:src.pctl.points_pre_transform.rgb_only_transform.rgb_only_pre_transform}}" datamodule.epsg=32633 predict.gpus=1 logger.comet.disabled=true predict.output_dir="data/test" +ckpt_path="assets/proto151_V2.0_epoch_100_Myria3DV3.1.0.ckpt"'
+                f'python run.py task.task_name=predict predict.src_las="{merged_file}" datamodule.points_pre_transform._args_[0]="${{get_method:src.pctl.points_pre_transform.rgb_only_transform.rgb_only_pre_transform}}" datamodule.epsg=32633 predict.gpus=1 logger.comet.disabled=true predict.output_dir="data/test" +ckpt_path="configs/callbacks/proto151_V2.0_epoch_100_Myria3DV3.1.0.ckpt"'
             )
         else:
             print(

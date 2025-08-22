@@ -18,7 +18,7 @@ datamodule:
   batch_size: 50 
 
 model:
-  ckpt_path: "assets/"  # override
+  ckpt_path: "configs/callback/"  # override
 
 trainer:
   num_sanity_val_steps: 0

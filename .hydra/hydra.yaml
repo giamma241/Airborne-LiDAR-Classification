@@ -137,7 +137,7 @@ hydra:
     - path: hydra.conf
       schema: pkg
       provider: hydra
-    - path: C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification\assets
+    - path: C:\Users\gianm\Documents\Uni\Big Data\report\airborne-lidar-classification\configs\model
       schema: file
       provider: main
     - path: hydra_plugins.hydra_colorlog.conf

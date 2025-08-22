@@ -21,7 +21,7 @@ from src.pctl.dataset.utils import get_las_paths_by_split_dict
 from src.utils import rich_utils, utils
 
 TASK_NAME_DETECTION_STRING = "task.task_name="
-DEFAULT_DIRECTORY = "assets/"
+DEFAULT_DIRECTORY = "configs/model/"
 DEFAULT_CONFIG_FILE = "proto151_V2.0_epoch_100_Myria3DV3.1.0_predict_config_V3.7.0.yaml"
 DEFAULT_CHECKPOINT = "proto151_V2.0_epoch_100_Myria3DV3.1.0.ckpt"
 DEFAULT_ENV = "placeholder.env"
